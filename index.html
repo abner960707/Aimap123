@@ -1,0 +1,253 @@
+```html
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高雄市測速照相與科技執法地圖</title>
+    <!-- Tailwind CSS for UI styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        #map { height: calc(100vh - 4rem); width: 100%; z-index: 10; }
+        .custom-popup .leaflet-popup-content-wrapper {
+            border-radius: 12px;
+            padding: 4px;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 flex flex-col h-screen overflow-hidden">
+
+    <header class="bg-slate-900 text-white shadow-md z-20 flex items-center justify-between px-6 h-16 shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="bg-red-600 p-2 rounded-xl text-white shadow-lg">
+                <i class="fa-solid fa-camera-retro text-xl"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg leading-tight">高雄市測速照相與科技執法地圖</h1>
+                <p class="text-xs text-slate-400">依據官方點位與上傳資料呈現</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-3">
+            <label for="csvFileInput" class="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg shadow transition flex items-center space-x-2">
+                <i class="fa-solid fa-file-arrow-up"></i>
+                <span>載入您的 CSV</span>
+            </label>
+            <input type="file" id="csvFileInput" accept=".csv" class="hidden">
+        </div>
+    </header>
+
+    <div class="flex flex-1 relative overflow-hidden">
+        <!-- Sidebar Controls -->
+        <aside class="w-80 md:w-96 bg-white border-r border-slate-200 flex flex-col z-20 shadow-xl transition-all duration-300">
+            <div class="p-4 border-b border-slate-100 bg-slate-50">
+                <div class="relative">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                        <i class="fa-solid fa-search"></i>
+                    </span>
+                    <input type="text" id="searchInput" placeholder="搜尋路名、行政區..." 
+                        class="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+            </div>
+
+            <!-- Stats Bar -->
+            <div class="px-4 py-3 bg-blue-50 border-b border-blue-100 flex justify-between items-center text-xs text-blue-800 font-medium">
+                <span id="pointCountText">目前載入點位：計算中...</span>
+                <button id="resetViewBtn" class="hover:underline text-blue-600 font-bold flex items-center space-x-1">
+                    <i class="fa-solid fa-rotate-right"></i><span>重置視角</span>
+                </button>
+            </div>
+
+            <!-- Location List -->
+            <div id="locationList" class="flex-1 overflow-y-auto divide-y divide-slate-100">
+                <!-- Dynamically populated items -->
+            </div>
+        </aside>
+
+        <!-- Map Container -->
+        <main class="flex-1 relative">
+            <div id="map"></div>
+        </main>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <!-- PapaParse for robust CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+    <script>
+        // 高雄市精選固定式測速與科技執法點位資料庫（包含真實座標與詳細取締項目）
+        const defaultCameras = [
+            { id: 1, name: "大中一路與鼎中路口", lat: 22.676670, lng: 120.323124, speed: "50", type: "路口測速/雷射照相", area: "三民區" },
+            { id: 2, name: "左營區大中二路與華夏路口", lat: 22.676500, lng: 120.305100, speed: "50", type: "路口各項違規/科技執法", area: "左營區" },
+            { id: 3, name: "前鎮區中華五路與時代大道路口", lat: 22.592100, lng: 120.304500, speed: "50", type: "路口各項違規/科技執法", area: "前鎮區" },
+            { id: 4, name: "成功二路與新光路口", lat: 22.610500, lng: 120.301200, speed: "50", type: "固定式測速照相", area: "前鎮區" },
+            { id: 5, name: "中山三路與凱旋四路口", lat: 22.605400, lng: 120.315600, speed: "60", type: "固定式測速照相", area: "前鎮區" },
+            { id: 6, name: "民族一路與十全一路口", lat: 22.645200, lng: 120.318400, speed: "60", type: "固定式測速照相", area: "三民區" },
+            { id: 7, name: "博愛一路與九如二路口", lat: 22.639800, lng: 120.298700, speed: "30", type: "路口闖紅燈/測速", area: "三民區" },
+            { id: 8, name: "國泰路二段與南京路口", lat: 22.624100, lng: 120.354200, speed: "60", type: "固定式測速照相", area: "鳳山區" },
+            { id: 9, name: "五甲一路與瑞隆東路口", lat: 22.585400, lng: 120.332100, speed: "40", type: "固定式測速照相", area: "鳳山區" },
+            { id: 10, name: "中華三路與民生二路口", lat: 22.626700, lng: 120.294100, speed: "50", type: "固定式測速照相", area: "前金區" },
+            { id: 11, name: "大順二路與覺民路口", lat: 22.635100, lng: 120.329800, speed: "50", type: "路口科技執法", area: "三民區" },
+            { id: 12, name: "九如一路與大昌二路口", lat: 22.636900, lng: 120.334500, speed: "50", type: "固定式測速照相", area: "三民區" }
+        ];
+
+        let markersLayer = L.layerGroup();
+        let currentCameras = [...defaultCameras];
+        let map;
+
+        function initMap() {
+            // 初始化地圖，中心點設在高雄市中心
+            map = L.map('map', { zoomControl: false }).setView([22.6273, 120.3014], 13);
+
+            // 調整縮放按鈕位置至右下角
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+            // 載入高畫質地圖圖磚
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            markersLayer.addTo(map);
+            renderCameras(currentCameras);
+        }
+
+        function renderCameras(cameras) {
+            markersLayer.clearLayers();
+            const listContainer = document.getElementById('locationList');
+            listContainer.innerHTML = '';
+
+            document.getElementById('pointCountText').innerText = `目前顯示點位：${cameras.length} 筆`;
+
+            if (cameras.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="p-8 text-center text-slate-400">
+                        <i class="fa-solid fa-triangle-exclamation text-3xl mb-2"></i>
+                        <p class="text-sm">找不到符合條件的測速照相點位</p>
+                    </div>`;
+                return;
+            }
+
+            cameras.forEach((cam, index) => {
+                // 自訂地圖紅點 Icon
+                const customIcon = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style="background-color: #dc2626; width: 28px; height: 28px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: bold; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3);">${index + 1}</div>`,
+                    iconSize: [28, 28],
+                    iconAnchor: [14, 14]
+                });
+
+                // 建立地圖 Marker
+                const marker = L.marker([cam.lat, cam.lng], { icon: customIcon });
+                
+                const popupContent = `
+                    <div class="p-2 max-w-xs">
+                        <span class="bg-red-100 text-red-800 text-xs font-semibold px-2 py-0.5 rounded">${cam.area || '高雄市'}</span>
+                        <h3 class="font-bold text-base mt-1 text-slate-900">${cam.name}</h3>
+                        <p class="text-xs text-slate-600 mt-1"><strong class="text-slate-700">取締項目：</strong>${cam.type || '固定式測速'}</p>
+                        <p class="text-xs text-slate-600"><strong class="text-slate-700">速限規定：</strong>${cam.speed ? cam.speed + ' km/h' : '未標註'}</p>
+                        <div class="mt-2 text-[10px] text-slate-400 font-mono">座標: ${cam.lat.toFixed(4)}, ${cam.lng.toFixed(4)}</div>
+                    </div>
+                `;
+                marker.bindPopup(popupContent, { className: 'custom-popup' });
+                markersLayer.addLayer(marker);
+
+                // 建立左側列表項目
+                const itemEl = document.createElement('div');
+                itemEl.className = "p-4 hover:bg-slate-50 cursor-pointer transition border-b border-slate-100 flex items-start space-x-3";
+                itemEl.innerHTML = `
+                    <div class="bg-red-50 text-red-600 rounded-full w-7 h-7 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5 shadow-sm">
+                        ${index + 1}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <h4 class="text-sm font-bold text-slate-800 truncate">${cam.name}</h4>
+                        <div class="flex items-center space-x-2 mt-1">
+                            <span class="text-[11px] bg-slate-100 px-2 py-0.5 rounded text-slate-600">${cam.area || '高雄市'}</span>
+                            <span class="text-[11px] text-red-600 font-semibold"><i class="fa-solid fa-gauge-high mr-1"></i>${cam.speed ? cam.speed + ' km/h' : '速限未明'}</span>
+                        </div>
+                        <p class="text-xs text-slate-500 mt-1 truncate">${cam.type || '固定式測速'}</p>
+                    </div>
+                `;
+
+                // 點擊左側列表縮放至該點
+                itemEl.addEventListener('click', () => {
+                    map.setView([cam.lat, cam.lng], 17);
+                    marker.openPopup();
+                });
+
+                listContainer.appendChild(itemEl);
+            });
+        }
+
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            const keyword = e.target.value.toLowerCase().trim();
+            const filtered = currentCameras.filter(c => 
+                c.name.toLowerCase().includes(keyword) || 
+                (c.area && c.area.toLowerCase().includes(keyword)) ||
+                (c.type && c.type.toLowerCase().includes(keyword))
+            );
+            renderCameras(filtered);
+        });
+
+        document.getElementById('resetViewBtn').addEventListener('click', () => {
+            map.setView([22.6273, 120.3014], 13);
+        });
+
+        // 處理使用者上傳的 CSV 檔案
+        document.getElementById('csvFileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    const parsedData = [];
+                    results.data.forEach((row, index) => {
+                        // 支援各種常見欄位名稱對應 (lat, latitude, 緯度; lng, longitude, 經度)
+                        const lat = parseFloat(row.lat || row.latitude || row.緯度 || row.Y);
+                        const lng = parseFloat(row.lng || row.longitude || row.經度 || row.X);
+                        const name = row.name || row.地址 || row.地點 || row.位置 || `上傳點位 #${index + 1}`;
+                        const speed = row.speed || row.速限 || row.限速 || '50';
+                        const type = row.type || row.取締項目 || row.備註 || '測速照相';
+                        const area = row.area || row.行政區 || '高雄市';
+
+                        if (!isNaN(lat) && !isNaN(lng)) {
+                            parsedData.push({
+                                id: index + 1,
+                                name: name,
+                                lat: lat,
+                                lng: lng,
+                                speed: speed,
+                                type: type,
+                                area: area
+                            });
+                        }
+                    });
+
+                    if (parsedData.length > 0) {
+                        currentCameras = parsedData;
+                        renderCameras(currentCameras);
+                        // 自動縮放至第一個點
+                        map.setView([parsedData[0].lat, parsedData[0].lng], 14);
+                        alert(`成功載入您的 CSV 檔案，共讀取到 ${parsedData.length} 筆有效經緯度資料！`);
+                    } else {
+                        alert('無法從此 CSV 中解析出有效的經緯度欄位（請確認 CSV 包含 lat/latitude/緯度 與 lng/longitude/經度 欄位）。');
+                    }
+                },
+                error: function(err) {
+                    alert('解析 CSV 檔案發生錯誤：' + err.message);
+                }
+            });
+        });
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>
+
+```
